@@ -1,0 +1,823 @@
+# Event Ticket Booking System - Backend Requirements
+
+## Overview
+
+Build a production-oriented event ticket booking backend using:
+
+* Node.js
+* Express.js
+* MongoDB
+* Redis
+
+The system should support:
+
+* Event listing
+* Seat selection
+* Temporary seat reservation
+* Booking confirmation
+* Prevention of double booking
+* Concurrent user handling
+
+The design should use Redis for temporary seat locks and MongoDB as the source of truth.
+
+---
+
+# Architecture
+
+```
+                 React Frontend
+
+                       |
+
+                       |
+
+                Node.js Express API
+
+                       |
+
+          ----------------------------
+
+          |                          |
+
+          v                          v
+
+       Redis                     MongoDB
+
+ Temporary Seat Locks        Permanent Data
+
+ TTL based                   Events
+
+ 10 minutes                  Seats
+
+                             Reservations
+
+                             Orders
+```
+
+---
+
+# Core Design Decisions
+
+## Redis Responsibility
+
+Redis manages temporary seat reservations.
+
+A seat should be locked temporarily when a user starts checkout.
+
+Example:
+
+```
+seat:eventId:seatId
+```
+
+Value:
+
+```
+userId
+```
+
+TTL:
+
+```
+600 seconds
+```
+
+Example:
+
+```
+seat:event123:A5 = user123
+
+Expires after 10 minutes
+```
+
+Redis prevents multiple users from reserving the same seat.
+
+---
+
+## MongoDB Responsibility
+
+MongoDB stores permanent business data:
+
+* Events
+* Seats
+* Reservations
+* Orders
+
+MongoDB is the source of truth.
+
+---
+
+# Database Models
+
+## Event Model
+
+Collection:
+
+```
+events
+```
+
+Schema:
+
+```javascript
+{
+  _id: ObjectId,
+
+  name: String,
+
+  venue: String,
+
+  date: Date,
+
+  status:
+    "on_sale" |
+    "sold_out" |
+    "cancelled",
+
+  seatConfig: {
+
+    rows: Number,
+
+    seatsPerRow: Number,
+
+    seatTypes: {
+
+      regular:{
+        name:String,
+        price:Number,
+        rows:[Number]
+      },
+
+      premium:{
+        name:String,
+        price:Number,
+        rows:[Number]
+      },
+
+      vip:{
+        name:String,
+        price:Number,
+        rows:[Number]
+      }
+
+    }
+
+  },
+
+  createdAt: Date,
+
+  updatedAt: Date
+}
+```
+
+Example:
+
+```json
+{
+"name":"Avengers Movie",
+"venue":"PVR Cinema",
+"status":"on_sale",
+
+"seatConfig":{
+ "rows":8,
+ "seatsPerRow":12,
+
+ "seatTypes":{
+   "regular":{
+     "price":150,
+     "rows":[0,1,2]
+   },
+
+   "premium":{
+     "price":250,
+     "rows":[3,4,5]
+   },
+
+   "vip":{
+     "price":350,
+     "rows":[6,7]
+   }
+ }
+}
+}
+```
+
+---
+
+# Seat Model
+
+Collection:
+
+```
+seats
+```
+
+Important:
+
+Seat does NOT contain reserved state.
+
+Seat only represents permanent inventory state.
+
+Allowed status:
+
+```
+available
+booked
+```
+
+Schema:
+
+```javascript
+{
+ _id:ObjectId,
+
+ eventId:ObjectId,
+
+ seatNumber:String,
+
+ row:Number,
+
+ column:Number,
+
+ type:
+ "regular" |
+ "premium" |
+ "vip",
+
+ price:Number,
+
+
+ status:
+ "available" |
+ "booked",
+
+
+ orderId:ObjectId|null,
+
+
+ version:Number,
+
+
+ createdAt:Date,
+
+ updatedAt:Date
+}
+```
+
+---
+
+# Why No Reserved Status?
+
+Temporary reservation is handled by Redis.
+
+Example:
+
+Redis:
+
+```
+seat:event123:A5
+
+value:
+user123
+
+TTL:
+600 seconds
+```
+
+MongoDB seat remains:
+
+```
+available
+```
+
+until payment succeeds.
+
+This avoids cleanup problems.
+
+---
+
+# Reservation Model
+
+Collection:
+
+```
+reservations
+```
+
+Purpose:
+
+Stores temporary reservation history.
+
+Schema:
+
+```javascript
+{
+ _id:ObjectId,
+
+
+ userId:ObjectId,
+
+
+ eventId:ObjectId,
+
+
+ seatIds:[
+   ObjectId
+ ],
+
+
+ status:
+
+ "pending" |
+ "confirmed" |
+ "expired" |
+ "cancelled",
+
+
+ expiresAt:Date,
+
+
+ createdAt:Date,
+
+
+ updatedAt:Date
+}
+```
+
+---
+
+# Order Model
+
+Collection:
+
+```
+orders
+```
+
+Schema:
+
+```javascript
+{
+ _id:ObjectId,
+
+
+ userId:ObjectId,
+
+
+ eventId:ObjectId,
+
+
+ seatIds:[
+   ObjectId
+ ],
+
+
+ totalPrice:Number,
+
+
+ status:
+
+ "pending" |
+ "confirmed" |
+ "cancelled",
+
+
+ paymentId:String,
+
+
+ createdAt:Date,
+
+
+ updatedAt:Date
+}
+```
+
+---
+
+# Redis Structure
+
+Redis stores temporary seat locks.
+
+Key:
+
+```
+seat:{eventId}:{seatId}
+```
+
+Example:
+
+```
+seat:event123:A5
+```
+
+Value:
+
+```
+user123
+```
+
+TTL:
+
+```
+600 seconds
+```
+
+Command:
+
+```redis
+SET seat:event123:A5 user123 NX EX 600
+```
+
+Explanation:
+
+NX:
+Only create if key does not exist.
+
+EX:
+Automatically expire after given seconds.
+
+---
+
+# API Requirements
+
+---
+
+# GET All Events
+
+Endpoint:
+
+```
+GET /api/events
+```
+
+Purpose:
+
+Return all events available for booking.
+
+Response:
+
+```json
+[
+ {
+  "id":"event123",
+  "name":"Avengers",
+  "venue":"PVR",
+  "date":"2026-06-20",
+  "status":"on_sale"
+ }
+]
+```
+
+---
+
+# GET Event Details
+
+Endpoint:
+
+```
+GET /api/events/:id
+```
+
+Purpose:
+
+Return:
+
+* Event details
+* Seat layout
+* Current seat availability
+
+Flow:
+
+1. Fetch event from MongoDB.
+2. Fetch seats from MongoDB.
+3. Check Redis locks.
+4. Mark locked seats as temporarily unavailable in response.
+
+Response:
+
+```json
+{
+ "event":{
+   "name":"Avengers"
+ },
+
+ "seats":[
+
+ {
+  "seatNumber":"A1",
+  "type":"regular",
+  "price":150,
+  "status":"available"
+ },
+
+ {
+  "seatNumber":"A2",
+  "type":"premium",
+  "price":250,
+  "status":"reserved"
+ }
+
+ ]
+}
+```
+
+---
+
+# POST Reserve Seats
+
+Endpoint:
+
+```
+POST /api/reserve
+```
+
+Request:
+
+```json
+{
+ "userId":"user123",
+
+ "eventId":"event123",
+
+ "seatIds":[
+   "seat1",
+   "seat2"
+ ]
+}
+```
+
+---
+
+## Reservation Flow
+
+Step 1:
+
+Acquire Redis lock.
+
+For every seat:
+
+```
+SET seat:event123:seat1 user123 NX EX 600
+```
+
+If any seat already exists:
+
+Return:
+
+```json
+{
+ "error":"Seat unavailable"
+}
+```
+
+---
+
+Step 2:
+
+Create MongoDB reservation.
+
+Example:
+
+```javascript
+{
+ userId:"user123",
+
+ eventId:"event123",
+
+ seatIds:[
+   "seat1",
+   "seat2"
+ ],
+
+ status:"pending",
+
+ expiresAt:"10 minutes later"
+}
+```
+
+---
+
+Response:
+
+```json
+{
+ "reservationId":"reservation123",
+
+ "expiresAt":"2026-06-20T10:10:00"
+}
+```
+
+---
+
+# POST Confirm Booking
+
+Endpoint:
+
+```
+POST /api/bookings
+```
+
+Request:
+
+```json
+{
+ "reservationId":"reservation123",
+
+ "paymentId":"payment123"
+}
+```
+
+---
+
+# Booking Flow
+
+1. Verify reservation exists.
+2. Check reservation expiry.
+3. Start MongoDB transaction.
+
+Transaction:
+
+Update seats:
+
+Before:
+
+```
+available
+```
+
+After:
+
+```
+booked
+```
+
+Create Order.
+
+Update Reservation:
+
+```
+pending -> confirmed
+```
+
+Delete Redis locks.
+
+---
+
+# Concurrency Handling
+
+## Redis Atomic Lock
+
+Prevents:
+
+```
+User A reserves A1
+
+User B reserves A1
+```
+
+Only one succeeds.
+
+---
+
+# Optimistic Concurrency Using Version
+
+Seat document:
+
+```json
+{
+ "seatNumber":"A5",
+
+ "status":"available",
+
+ "version":5
+}
+```
+
+Update:
+
+```javascript
+Seat.updateOne(
+{
+ _id:"A5",
+
+ status:"available",
+
+ version:5
+},
+{
+ $set:{
+  status:"booked"
+ },
+
+ $inc:{
+  version:1
+ }
+}
+)
+```
+
+Successful update:
+
+```
+modifiedCount = 1
+```
+
+Failed update:
+
+```
+modifiedCount = 0
+```
+
+Meaning:
+
+Another user already changed the seat.
+
+Return:
+
+```
+Seat unavailable
+```
+
+---
+
+# Error Handling
+
+## Seat Already Reserved
+
+Response:
+
+```json
+{
+ "message":"Seat is currently reserved"
+}
+```
+
+---
+
+## Reservation Expired
+
+Response:
+
+```json
+{
+ "message":"Reservation expired"
+}
+```
+
+---
+
+## Concurrent Booking Failure
+
+Response:
+
+```json
+{
+ "message":"Seat no longer available"
+}
+```
+
+---
+
+# Expected Backend Folder Structure
+
+```
+backend
+
+src
+
+ ├── controllers
+
+ ├── routes
+
+ ├── models
+
+ ├── services
+
+ ├── redis
+
+ ├── middleware
+
+ ├── utils
+
+ ├── config
+
+ └── app.js
+```
+
+---
+
+# Implementation Requirements
+
+The implementation should include:
+
+* Express.js REST APIs
+* MongoDB models using Mongoose
+* Redis client integration
+* Atomic Redis seat locking
+* MongoDB transactions
+* Optimistic concurrency using version field
+* Proper validation
+* Error handling middleware
+* Environment based configuration
+
+The goal is to build a production-style ticket reservation system, not a simple CRUD application.
