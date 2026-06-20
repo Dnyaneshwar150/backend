@@ -35,7 +35,7 @@ export const config = {
     nodeEnv: optionalEnv("NODE_ENV", "development"),
     isDevelopment: optionalEnv("NODE_ENV", "development") === "development",
     isProduction: optionalEnv("NODE_ENV", "development") === "production",
-    frontendBaseUrl: optionalEnv("FRONTEND_BASE_URL", "http://localhost:3001"),
+    frontendBaseUrl: optionalEnv("FRONTEND_BASE_URL", "http://localhost:5173"),
   },
 
   mongodb: {
