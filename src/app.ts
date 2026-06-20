@@ -3,6 +3,7 @@ import cors from "cors";
 import apiRoutes from "./routes/index";
 import { globalErrorHandler } from "./middleware/errorHandler";
 import { AppError } from "./utils/AppError";
+import { config } from "./config/env";
 
 const app = express();
 
@@ -10,7 +11,12 @@ app.use(express.json());
 
 app.use(express.urlencoded({ extended: true }));
 
-app.use(cors());
+app.use(
+  cors({
+    origin: config.server.frontendBaseUrl,
+    credentials: true,
+  }),
+);
 
 app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({
