@@ -1,8 +1,3 @@
-// ─────────────────────────────────────────────
-// Custom Application Error Class
-// isOperational = true means it is a known, expected error (4xx)
-// isOperational = false means it is a programming bug (5xx)
-// ─────────────────────────────────────────────
 export class AppError extends Error {
   public readonly statusCode: number;
   public readonly isOperational: boolean;

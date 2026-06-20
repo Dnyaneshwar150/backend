@@ -1,13 +1,9 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from "express";
 
-// ─────────────────────────────────────────────
-// Wraps async route handlers to forward errors to Express error middleware
-// Eliminates try/catch boilerplate in every controller
-// ─────────────────────────────────────────────
 type AsyncHandler = (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => Promise<void>;
 
 export const catchAsync = (fn: AsyncHandler) => {
